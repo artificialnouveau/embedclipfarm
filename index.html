@@ -103,6 +103,15 @@
         <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py index "@channelname" --max-videos 20</code><br>
         Then load the generated <code style="background:#282828;color:#e040fb;padding:1px 4px;border-radius:2px;">channelname/index.json</code> below.
       </div>
+
+      <div style="background:#1a1a1a;border:1px solid #282828;border-radius:8px;padding:16px;font-size:0.8rem;color:#888;line-height:1.9;margin-top:12px;">
+        <strong style="color:#fff;">Download clips from the CLI:</strong><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py clip VIDEO_ID --start 10 --end 41</code>
+        <span style="color:#555;margin-left:6px;">Download a specific segment</span><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py search "slugs" --download ./clips</code>
+        <span style="color:#555;margin-left:6px;">Search and download all matching clips</span><br>
+        <span style="color:#aaa;">Each search result below includes a <strong style="color:#e040fb;">Copy clip command</strong> button — paste it into your terminal to download that exact segment.</span>
+      </div>
     </div>
 
     <!-- Load index -->
@@ -162,7 +171,9 @@
           indexData = JSON.parse(e.target.result);
           showIndexInfo();
           document.getElementById("load-section").style.display = "none";
-          document.getElementById("about-section").style.display = "none";
+          // Keep about section but collapse it to just the CLI commands
+          var aboutKids = document.getElementById("about-section").children;
+          for (var i = 0; i < aboutKids.length - 1; i++) aboutKids[i].style.display = "none";
           document.getElementById("search-section").style.display = "block";
           document.getElementById("search-input").focus();
           ensureTextModel();
@@ -272,12 +283,12 @@
 
         // Embedded YouTube player starting at timestamp
         var playerWrap = document.createElement("div");
-        playerWrap.style.cssText = "margin:10px 0;border-radius:8px;overflow:hidden;aspect-ratio:16/9;background:#000;";
+        playerWrap.style.cssText = "margin:10px 0;border-radius:8px;overflow:hidden;position:relative;padding-bottom:56.25%;height:0;background:#000;";
         var iframe = document.createElement("iframe");
-        iframe.src = "https://www.youtube.com/embed/" + vid + "?start=" + ts + "&end=" + endTs + "&autoplay=0";
-        iframe.style.cssText = "width:100%;height:100%;border:none;";
+        iframe.src = "https://www.youtube.com/embed/" + vid + "?start=" + ts + "&autoplay=0";
+        iframe.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px;";
         iframe.allow = "accelerometer; encrypted-media; gyroscope; picture-in-picture";
-        iframe.allowFullscreen = true;
+        iframe.setAttribute("allowfullscreen", "");
         iframe.loading = "lazy";
         playerWrap.appendChild(iframe);
         card.appendChild(playerWrap);
