@@ -26,13 +26,14 @@ YouTube URLs → Transcripts → Chunked Text → Vector Embeddings → Searchab
 
 - **CLIP visual search** — Sample keyframes from videos and embed them with [CLIP](https://github.com/mlfoundations/open_clip). Search by visual description ("person at a podium") to find matching frames.
 - **Whisper fallback** — For videos without captions, download the audio and transcribe with [faster-whisper](https://github.com/SYSTRAN/faster-whisper).
+- **Browser cookies** — Access age-restricted videos by using your browser's YouTube login session.
 
 ## Quick Start
 
 ### Install
 
 ```bash
-pip install youtube-transcript-api chromadb sentence-transformers numpy
+pip install youtube-transcript-api chromadb sentence-transformers numpy python-dotenv
 ```
 
 You also need [yt-dlp](https://github.com/yt-dlp/yt-dlp) installed:
@@ -63,7 +64,7 @@ python embedclipfarm.py index "https://www.youtube.com/watch?v=VIDEO_ID"
 # Multiple videos
 python embedclipfarm.py index "https://youtube.com/watch?v=ID1" "https://youtube.com/watch?v=ID2"
 
-# Entire playlist (requires YouTube Data API key — see below)
+# Entire playlist
 python embedclipfarm.py index "https://youtube.com/playlist?list=PLxxxxx"
 
 # Channel
@@ -72,11 +73,23 @@ python embedclipfarm.py index "@channelhandle"
 # From a file of URLs
 python embedclipfarm.py index urls.txt
 
+# Show transcripts as they're indexed
+python embedclipfarm.py index "@channelhandle" --show-transcripts
+
+# Save transcripts to text files
+python embedclipfarm.py index "@channelhandle" --save-transcripts ./transcripts
+
 # With Whisper for videos without captions
 python embedclipfarm.py index "VIDEO_URL" --whisper
 
+# With browser cookies for age-restricted videos
+python embedclipfarm.py index "@channelhandle" --cookies-from-browser chrome
+
 # With CLIP keyframe visual search
 python embedclipfarm.py index "VIDEO_URL" --clip
+
+# Kitchen sink — everything at once
+python embedclipfarm.py index "@channelhandle" --max-videos 20 --whisper --cookies-from-browser chrome --show-transcripts --save-transcripts ./transcripts
 ```
 
 ### Search
@@ -90,6 +103,19 @@ python embedclipfarm.py search "person giving speech at podium" --mode visual
 
 # Both text and visual
 python embedclipfarm.py search "climate policy" --mode both --top-k 20
+```
+
+### View transcripts
+
+```bash
+# Print all indexed transcripts
+python embedclipfarm.py transcripts
+
+# Print transcript for a specific video
+python embedclipfarm.py transcripts --video VIDEO_ID
+
+# Save all transcripts as .txt files
+python embedclipfarm.py transcripts --save ./transcripts
 ```
 
 ### Export for web UI
@@ -126,15 +152,18 @@ Sources:
   File containing URLs (one per line)
 
 Options:
-  --api-key KEY          YouTube Data API key (needed for playlists/channels)
-  --db-path PATH         ChromaDB storage path (default: ./embedclipfarm_db)
-  --chunk-seconds N      Transcript chunk size in seconds (default: 30)
-  --max-videos N         Max videos from playlist/channel (default: 200)
-  --clip                 Enable CLIP keyframe embedding
-  --frame-interval N     Seconds between keyframes (default: 30)
-  --max-frames N         Max keyframes per video (default: 20)
-  --whisper              Use Whisper for videos without captions
-  --whisper-model SIZE   tiny/base/small/medium/large-v3 (default: base)
+  --api-key KEY              YouTube Data API key (or set YOUTUBE_API_KEY in .env)
+  --db-path PATH             ChromaDB storage path (default: ./embedclipfarm_db)
+  --chunk-seconds N          Transcript chunk size in seconds (default: 30)
+  --max-videos N             Max videos from playlist/channel (default: 200)
+  --show-transcripts         Print transcripts to terminal during indexing
+  --save-transcripts DIR     Save raw transcripts as .txt files to a directory
+  --cookies-from-browser B   Browser to extract cookies from (chrome, firefox, safari)
+  --clip                     Enable CLIP keyframe embedding
+  --frame-interval N         Seconds between keyframes (default: 30)
+  --max-frames N             Max keyframes per video (default: 20)
+  --whisper                  Use Whisper for videos without captions
+  --whisper-model SIZE       tiny/base/small/medium/large-v3 (default: base)
 ```
 
 ### `search`
@@ -145,6 +174,17 @@ python embedclipfarm.py search <query> [options]
 Options:
   --mode MODE    text/visual/both (default: text)
   --top-k N      Number of results (default: 10)
+  --db-path PATH ChromaDB storage path
+```
+
+### `transcripts`
+
+```
+python embedclipfarm.py transcripts [options]
+
+Options:
+  --video ID     Show transcript for a specific video ID (default: all)
+  --save DIR     Save transcripts as .txt files to a directory
   --db-path PATH ChromaDB storage path
 ```
 
@@ -165,6 +205,7 @@ embedclipfarm.py     — Single-file CLI (Python)
 index.html           — Web search UI (standalone, no build step)
 worker.js            — Optional Cloudflare Worker proxy for web auto-fetch
 requirements.txt     — Python dependencies
+.env                 — YouTube API key (not committed)
 ```
 
 ### Data flow
