@@ -652,8 +652,34 @@ def cmd_index(args):
                 store.add_text_chunks(vid, chunks, embeddings)
                 print(f"  [indexed] {vid}: {len(chunks)} text chunks"
                       f" — {meta.get('title', '')[:50]}")
+
+                # Show transcript if requested
+                if args.show_transcripts:
+                    for c in chunks:
+                        print(f"    [{_fmt(c['start'])} → {_fmt(c['end'])}] {c['text'][:200]}")
         else:
             print(f"  [skipped] {vid}: no transcript")
+
+    # Save transcripts to files if requested
+    if args.save_transcripts:
+        out_dir = args.save_transcripts
+        os.makedirs(out_dir, exist_ok=True)
+        saved = 0
+        for vid in video_ids:
+            if vid not in transcripts:
+                continue
+            meta = metadata.get(vid, {})
+            title = meta.get("title", vid)
+            safe = re.sub(r'[^\w\s-]', '', title)[:60].strip().replace(' ', '_')
+            filepath = os.path.join(out_dir, f"{safe}_{vid}.txt")
+            segs = transcripts[vid]
+            with open(filepath, "w") as f:
+                f.write(f"# {title}\n")
+                f.write(f"# https://youtube.com/watch?v={vid}\n\n")
+                for s in segs:
+                    f.write(f"[{_fmt(s['start'])}] {s['text']}\n")
+            saved += 1
+        print(f"\n{saved} transcript(s) saved to {out_dir}/")
 
     # CLIP keyframes
     if args.clip:
@@ -877,6 +903,10 @@ def main():
         help="Whisper model size (default: base)")
     idx.add_argument("--cookies-from-browser", default=None,
         help="Browser to extract cookies from for age-restricted videos (e.g. chrome, firefox, safari)")
+    idx.add_argument("--show-transcripts", action="store_true",
+        help="Print transcripts to terminal during indexing")
+    idx.add_argument("--save-transcripts", default=None,
+        help="Save raw transcripts to a directory (e.g. --save-transcripts ./transcripts)")
 
     # --- search ---
     srch = sub.add_parser("search", help="Search indexed videos")
