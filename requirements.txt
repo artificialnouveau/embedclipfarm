@@ -1,0 +1,15 @@
+# Core
+youtube-transcript-api
+google-api-python-client
+chromadb
+sentence-transformers
+numpy
+
+# Optional: keyframe extraction + CLIP
+yt-dlp
+ffmpeg-python
+open-clip-torch
+Pillow
+
+# Optional: Whisper speech-to-text
+faster-whisper
