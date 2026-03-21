@@ -947,6 +947,112 @@ def cmd_transcripts(args):
     print(f"\n{len(videos)} video(s), {sum(len(c) for c in videos.values())} chunks total.")
 
 
+def cmd_clip(args):
+    """Download a specific clip from a YouTube video."""
+    video_id = extract_video_id(args.video) or args.video
+    start = args.start
+    end = args.end
+    padding = args.padding
+
+    # Apply padding
+    actual_start = max(0, start - padding)
+    actual_end = end + padding
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    out_dir = args.output_dir
+    os.makedirs(out_dir, exist_ok=True)
+
+    # Build filename
+    safe_start = f"{int(start)}s"
+    safe_end = f"{int(end)}s"
+    filename = f"{video_id}_{safe_start}-{safe_end}.mp4"
+    output_path = os.path.join(out_dir, filename)
+
+    print(f"Downloading clip: {video_id} [{_fmt(actual_start)} → {_fmt(actual_end)}]")
+
+    cmd = [
+        "yt-dlp", "--remote-components", "ejs:github",
+        "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--download-sections", f"*{actual_start}-{actual_end}",
+        "--force-keyframes-at-cuts",
+        "-o", output_path,
+        url,
+    ]
+    if args.cookies_from_browser:
+        cmd.insert(1, f"--cookies-from-browser={args.cookies_from_browser}")
+
+    result = subprocess.run(cmd, capture_output=False)
+
+    if result.returncode == 0 and os.path.exists(output_path):
+        size_mb = os.path.getsize(output_path) / 1048576
+        print(f"\nSaved: {output_path} ({size_mb:.1f} MB)")
+    else:
+        print(f"\nDownload failed. Try adding --cookies-from-browser chrome")
+
+
+def cmd_search_and_clip(args):
+    """Search and optionally download matching clips."""
+    args.db_path = _find_db_path(args.db_path)
+    store = VectorStore(db_path=args.db_path)
+
+    SentenceTransformer = _import_sentence_transformers()
+    text_model = SentenceTransformer("all-MiniLM-L6-v2")
+    query_emb = text_model.encode([args.query], normalize_embeddings=True).tolist()[0]
+    results = store.search_text(query_emb, top_k=args.top_k)
+
+    print(f"\n{'='*60}")
+    print(f"TEXT SEARCH: \"{args.query}\"")
+    print(f"{'='*60}")
+
+    clips_to_download = []
+    for i, r in enumerate(results):
+        meta = r["metadata"]
+        vid_meta = store.get_metadata(meta["video_id"])
+        title = vid_meta.get("title", meta["video_id"])
+        start = meta.get("start", 0)
+        end = meta.get("end", 0)
+        print(f"\n  [{i+1}] [{r['score']:.3f}] {title}")
+        print(f"         Video: https://youtube.com/watch?v={meta['video_id']}&t={int(start)}")
+        print(f"         Time:  {_fmt(start)} → {_fmt(end)}")
+        print(f"         Text:  {r['text'][:150]}...")
+        print(f"         Clip:  python embedclipfarm.py clip {meta['video_id']} --start {start:.0f} --end {end:.0f}")
+        clips_to_download.append((meta["video_id"], start, end, title))
+
+    if args.download:
+        out_dir = args.download
+        os.makedirs(out_dir, exist_ok=True)
+        print(f"\n{'='*60}")
+        print(f"Downloading {len(clips_to_download)} clip(s) to {out_dir}/...")
+        print(f"{'='*60}")
+        for vid, start, end, title in clips_to_download:
+            actual_start = max(0, start - 2)
+            actual_end = end + 2
+            safe_title = re.sub(r'[^\w\s-]', '', title)[:40].strip().replace(' ', '_')
+            filename = f"{safe_title}_{int(start)}s-{int(end)}s.mp4"
+            output_path = os.path.join(out_dir, filename)
+            url = f"https://www.youtube.com/watch?v={vid}"
+
+            print(f"\n  Downloading: {title} [{_fmt(start)} → {_fmt(end)}]")
+            cmd = [
+                "yt-dlp", "--remote-components", "ejs:github",
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "--download-sections", f"*{actual_start}-{actual_end}",
+                "--force-keyframes-at-cuts",
+                "-o", output_path,
+                url,
+            ]
+            if args.cookies_from_browser:
+                cmd.insert(1, f"--cookies-from-browser={args.cookies_from_browser}")
+            subprocess.run(cmd, capture_output=True)
+            if os.path.exists(output_path):
+                size = os.path.getsize(output_path) / 1048576
+                print(f"  Saved: {output_path} ({size:.1f} MB)")
+            else:
+                print(f"  Failed to download clip")
+
+        print(f"\nDone! Clips saved to {out_dir}/")
+
+
 def _fmt(seconds):
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
@@ -1003,6 +1109,22 @@ def main():
         help="Number of results (default: 10)")
     srch.add_argument("--db-path", default="./embedclipfarm_db",
         help="ChromaDB storage path")
+    srch.add_argument("--download", default=None, metavar="DIR",
+        help="Download all matching clips to a directory (e.g. --download ./clips)")
+    srch.add_argument("--cookies-from-browser", default=None,
+        help="Browser cookies for age-restricted clip downloads")
+
+    # --- clip ---
+    cl = sub.add_parser("clip", help="Download a specific clip from YouTube")
+    cl.add_argument("video", help="YouTube video URL or ID")
+    cl.add_argument("--start", type=float, required=True, help="Start time in seconds")
+    cl.add_argument("--end", type=float, required=True, help="End time in seconds")
+    cl.add_argument("--padding", type=float, default=2,
+        help="Seconds of padding before/after (default: 2)")
+    cl.add_argument("--output-dir", default="./clips",
+        help="Output directory (default: ./clips)")
+    cl.add_argument("--cookies-from-browser", default=None,
+        help="Browser cookies for age-restricted videos")
 
     # --- export ---
     exp = sub.add_parser("export", help="Export index for web UI")
@@ -1029,11 +1151,13 @@ def main():
     if args.command == "index":
         cmd_index(args)
     elif args.command == "search":
-        cmd_search(args)
+        cmd_search_and_clip(args)
     elif args.command == "export":
         cmd_export(args)
     elif args.command == "transcripts":
         cmd_transcripts(args)
+    elif args.command == "clip":
+        cmd_clip(args)
 
 
 if __name__ == "__main__":
