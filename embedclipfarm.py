@@ -766,6 +766,73 @@ def cmd_export(args):
     print(f"Load this file in the web UI for browser-based search.")
 
 
+def cmd_transcripts(args):
+    store = VectorStore(db_path=args.db_path)
+    data = store.text_collection.get(include=["documents", "metadatas"])
+    all_metadata = store.get_all_metadata()
+
+    # Group chunks by video
+    videos = {}
+    for i, meta in enumerate(data["metadatas"]):
+        vid = meta["video_id"]
+        if args.video and vid != args.video:
+            continue
+        if vid not in videos:
+            videos[vid] = []
+        videos[vid].append({
+            "start": meta.get("start", 0),
+            "end": meta.get("end", 0),
+            "text": data["documents"][i],
+        })
+
+    if not videos:
+        if args.video:
+            print(f"No transcript found for video: {args.video}")
+        else:
+            print("No transcripts in the index.")
+        return
+
+    # Sort chunks by start time within each video
+    for vid in videos:
+        videos[vid].sort(key=lambda c: c["start"])
+
+    # Save to files
+    if args.save:
+        os.makedirs(args.save, exist_ok=True)
+        for vid, chunks in videos.items():
+            vid_meta = all_metadata.get(vid, {})
+            title = vid_meta.get("title", vid)
+            safe_name = re.sub(r'[^\w\s-]', '', title)[:60].strip().replace(' ', '_')
+            filename = f"{safe_name}_{vid}.txt"
+            filepath = os.path.join(args.save, filename)
+
+            with open(filepath, "w") as f:
+                f.write(f"# {title}\n")
+                f.write(f"# https://youtube.com/watch?v={vid}\n\n")
+                for chunk in chunks:
+                    f.write(f"[{_fmt(chunk['start'])} → {_fmt(chunk['end'])}]\n")
+                    f.write(f"{chunk['text']}\n\n")
+
+            print(f"  Saved: {filepath}")
+
+        print(f"\n{len(videos)} transcript(s) saved to {args.save}/")
+        return
+
+    # Print to terminal
+    for vid, chunks in videos.items():
+        vid_meta = all_metadata.get(vid, {})
+        title = vid_meta.get("title", vid)
+        print(f"\n{'='*60}")
+        print(f"{title}")
+        print(f"https://youtube.com/watch?v={vid}")
+        print(f"{'='*60}")
+        for chunk in chunks:
+            print(f"\n[{_fmt(chunk['start'])} → {_fmt(chunk['end'])}]")
+            print(chunk["text"])
+
+    print(f"\n{len(videos)} video(s), {sum(len(c) for c in videos.values())} chunks total.")
+
+
 def _fmt(seconds):
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
@@ -828,6 +895,15 @@ def main():
     exp.add_argument("--db-path", default="./embedclipfarm_db",
         help="ChromaDB storage path")
 
+    # --- transcripts ---
+    tr = sub.add_parser("transcripts", help="Show or save transcripts from indexed videos")
+    tr.add_argument("--video", default=None,
+        help="Show transcript for a specific video ID (default: all)")
+    tr.add_argument("--save", default=None,
+        help="Save transcripts to a directory (one .txt file per video)")
+    tr.add_argument("--db-path", default="./embedclipfarm_db",
+        help="ChromaDB storage path")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -840,6 +916,8 @@ def main():
         cmd_search(args)
     elif args.command == "export":
         cmd_export(args)
+    elif args.command == "transcripts":
+        cmd_transcripts(args)
 
 
 if __name__ == "__main__":
