@@ -767,7 +767,33 @@ def cmd_index(args):
     print(f"Web UI:    open index.html → load {index_path}")
 
 
+def _find_db_path(db_path):
+    """Auto-find a database if the default path doesn't exist."""
+    if os.path.exists(db_path):
+        return db_path
+
+    # Look for */db/ folders in current directory
+    dbs = sorted(Path(".").glob("*/db/chroma.sqlite3"))
+    if len(dbs) == 1:
+        found = str(dbs[0].parent)
+        print(f"Auto-detected database: {found}")
+        return found
+    elif len(dbs) > 1:
+        print("Multiple databases found. Specify one with --db-path:")
+        for d in dbs:
+            print(f"  --db-path {d.parent}")
+        sys.exit(1)
+
+    # Also check for embedclipfarm_db (legacy)
+    if os.path.exists("./embedclipfarm_db"):
+        return "./embedclipfarm_db"
+
+    print(f"No database found at {db_path}. Run 'index' first or specify --db-path.")
+    sys.exit(1)
+
+
 def cmd_search(args):
+    args.db_path = _find_db_path(args.db_path)
     store = VectorStore(db_path=args.db_path)
 
     if args.mode in ("text", "both"):
@@ -852,6 +878,7 @@ def cmd_export(args):
 
 
 def cmd_transcripts(args):
+    args.db_path = _find_db_path(args.db_path)
     store = VectorStore(db_path=args.db_path)
     data = store.text_collection.get(include=["documents", "metadatas"])
     all_metadata = store.get_all_metadata()
