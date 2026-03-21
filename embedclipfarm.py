@@ -221,7 +221,7 @@ def _fetch_metadata_ytdlp(video_id):
     try:
         url = f"https://www.youtube.com/watch?v={video_id}"
         result = subprocess.run(
-            ["yt-dlp", "--dump-json", "--skip-download", url],
+            ["yt-dlp", "--remote-components", "ejs:github", "--dump-json", "--skip-download", url],
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode != 0:
@@ -244,7 +244,8 @@ def _fetch_metadata_ytdlp(video_id):
 # Transcript
 # ---------------------------------------------------------------------------
 
-def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base"):
+def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base",
+                      cookies_browser=None):
     """Fetch transcripts for videos. Returns {video_id: [segments]}.
 
     Tries yt-dlp first (most reliable), then youtube-transcript-api,
@@ -255,7 +256,7 @@ def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base"):
 
     for vid in video_ids:
         # Try yt-dlp first
-        segments = _fetch_transcript_ytdlp(vid)
+        segments = _fetch_transcript_ytdlp(vid, cookies_browser=cookies_browser)
         if segments:
             transcripts[vid] = segments
             print(f"  [yt-dlp] {vid}: {len(segments)} segments")
@@ -282,7 +283,8 @@ def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base"):
 
         for vid in failed:
             try:
-                segments = _whisper_transcribe(vid, model)
+                segments = _whisper_transcribe(vid, model,
+                                               cookies_browser=cookies_browser)
                 if segments:
                     transcripts[vid] = segments
                     print(f"  [whisper] {vid}: {len(segments)} segments")
@@ -294,16 +296,20 @@ def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base"):
     return transcripts
 
 
-def _fetch_transcript_ytdlp(video_id):
+def _fetch_transcript_ytdlp(video_id, cookies_browser=None):
     """Fetch transcript using yt-dlp (most reliable method)."""
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             url = f"https://www.youtube.com/watch?v={video_id}"
             out_path = os.path.join(tmpdir, "sub")
+            cmd = ["yt-dlp", "--remote-components", "ejs:github",
+                   "--write-auto-sub", "--sub-lang", "en",
+                   "--sub-format", "json3", "--skip-download",
+                   "-o", out_path, url]
+            if cookies_browser:
+                cmd.insert(1, f"--cookies-from-browser={cookies_browser}")
             result = subprocess.run(
-                ["yt-dlp", "--write-auto-sub", "--sub-lang", "en",
-                 "--sub-format", "json3", "--skip-download",
-                 "-o", out_path, url],
+                cmd,
                 capture_output=True, text=True, timeout=30,
             )
 
@@ -339,17 +345,18 @@ def _fetch_transcript_ytdlp(video_id):
         return None
 
 
-def _whisper_transcribe(video_id, model):
+def _whisper_transcribe(video_id, model, cookies_browser=None):
     """Download audio via yt-dlp and transcribe with Whisper."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio.wav")
         url = f"https://www.youtube.com/watch?v={video_id}"
-        result = subprocess.run(
-            ["yt-dlp", "-x", "--audio-format", "wav",
-             "--postprocessor-args", "-ac 1 -ar 16000",
-             "-o", audio_path, url],
-            capture_output=True, text=True
-        )
+        cmd = ["yt-dlp", "--remote-components", "ejs:github",
+               "-x", "--audio-format", "wav",
+               "--postprocessor-args", "-ac 1 -ar 16000",
+               "-o", audio_path, url]
+        if cookies_browser:
+            cmd.insert(1, f"--cookies-from-browser={cookies_browser}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
         # yt-dlp may add extension
         if not os.path.exists(audio_path):
             for f in Path(tmpdir).glob("audio.*"):
@@ -426,7 +433,7 @@ def extract_keyframes(video_id, interval=30, max_frames=20):
 
         # Get direct stream URL
         result = subprocess.run(
-            ["yt-dlp", "-f", "best[height<=720]", "-g", url],
+            ["yt-dlp", "--remote-components", "ejs:github", "-f", "best[height<=720]", "-g", url],
             capture_output=True, text=True
         )
         stream_url = result.stdout.strip().split("\n")[0]
@@ -620,7 +627,8 @@ def cmd_index(args):
     # Transcripts
     print("\nFetching transcripts...")
     transcripts = fetch_transcripts(video_ids, use_whisper=args.whisper,
-                                     whisper_model_name=args.whisper_model)
+                                     whisper_model_name=args.whisper_model,
+                                     cookies_browser=args.cookies_from_browser)
 
     # Text embeddings
     print("\nLoading text embedding model...")
@@ -800,6 +808,8 @@ def main():
     idx.add_argument("--whisper-model", default="base",
         choices=["tiny", "base", "small", "medium", "large-v3"],
         help="Whisper model size (default: base)")
+    idx.add_argument("--cookies-from-browser", default=None,
+        help="Browser to extract cookies from for age-restricted videos (e.g. chrome, firefox, safari)")
 
     # --- search ---
     srch = sub.add_parser("search", help="Search indexed videos")
