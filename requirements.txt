@@ -4,6 +4,7 @@ google-api-python-client
 chromadb
 sentence-transformers
 numpy
+python-dotenv
 
 # Optional: keyframe extraction + CLIP
 yt-dlp

@@ -25,6 +25,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Load .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional — env vars still work
+
 # ---------------------------------------------------------------------------
 # Lazy imports — heavy libs only loaded when needed
 # ---------------------------------------------------------------------------
@@ -121,7 +128,7 @@ def resolve_source(source, api_key=None, max_results=200):
 
 def _fetch_playlist(playlist_id, api_key, max_results):
     if not api_key:
-        print("YouTube Data API key required for playlist indexing. Use --api-key.")
+        print("YouTube Data API key required for playlist indexing. Set YOUTUBE_API_KEY in .env or use --api-key.")
         sys.exit(1)
     build = _import_youtube_api()
     yt = build("youtube", "v3", developerKey=api_key)
@@ -146,7 +153,7 @@ def _fetch_playlist(playlist_id, api_key, max_results):
 
 def _fetch_channel(handle=None, channel_id=None, api_key=None, max_results=200):
     if not api_key:
-        print("YouTube Data API key required for channel indexing. Use --api-key.")
+        print("YouTube Data API key required for channel indexing. Set YOUTUBE_API_KEY in .env or use --api-key.")
         sys.exit(1)
     build = _import_youtube_api()
     yt = build("youtube", "v3", developerKey=api_key)
@@ -775,7 +782,7 @@ def main():
     idx.add_argument("source", nargs="+",
         help="YouTube URLs (video/playlist/channel), @handles, or file with URLs")
     idx.add_argument("--api-key", default=os.environ.get("YOUTUBE_API_KEY"),
-        help="YouTube Data API key (or set YOUTUBE_API_KEY env var)")
+        help="YouTube Data API key (or set YOUTUBE_API_KEY in .env file)")
     idx.add_argument("--db-path", default="./embedclipfarm_db",
         help="ChromaDB storage path")
     idx.add_argument("--chunk-seconds", type=int, default=30,

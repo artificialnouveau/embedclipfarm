@@ -1,0 +1,5 @@
+.env
+embedclipfarm_db/
+index.json
+__pycache__/
+*.pyc

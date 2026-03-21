@@ -42,6 +42,18 @@ pip install yt-dlp
 # or: brew install yt-dlp
 ```
 
+### Set up API key (for playlists/channels)
+
+Indexing individual videos works without an API key. For playlists or channels, you need a [YouTube Data API key](https://console.cloud.google.com/apis/credentials) (free).
+
+Create a `.env` file in the project directory:
+
+```bash
+echo "YOUTUBE_API_KEY=your_key_here" > .env
+```
+
+That's it — the CLI reads it automatically. You can also pass `--api-key` or set the env var directly.
+
 ### Index videos
 
 ```bash
@@ -51,11 +63,11 @@ python embedclipfarm.py index "https://www.youtube.com/watch?v=VIDEO_ID"
 # Multiple videos
 python embedclipfarm.py index "https://youtube.com/watch?v=ID1" "https://youtube.com/watch?v=ID2"
 
-# Entire playlist (requires YouTube Data API key)
-python embedclipfarm.py index "https://youtube.com/playlist?list=PLxxxxx" --api-key YOUR_KEY
+# Entire playlist (requires YouTube Data API key — see below)
+python embedclipfarm.py index "https://youtube.com/playlist?list=PLxxxxx"
 
-# Channel (requires API key)
-python embedclipfarm.py index "@channelhandle" --api-key YOUR_KEY
+# Channel
+python embedclipfarm.py index "@channelhandle"
 
 # From a file of URLs
 python embedclipfarm.py index urls.txt
