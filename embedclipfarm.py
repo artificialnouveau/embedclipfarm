@@ -768,27 +768,28 @@ def cmd_index(args):
 
 
 def _find_db_path(db_path):
-    """Auto-find a database if the default path doesn't exist."""
-    if os.path.exists(db_path):
-        return db_path
-
-    # Look for */db/ folders in current directory
+    """Auto-find a database. Prefers project subfolders over the default."""
+    # Look for */db/ folders in current directory (project subfolders)
     dbs = sorted(Path(".").glob("*/db/chroma.sqlite3"))
     if len(dbs) == 1:
         found = str(dbs[0].parent)
         print(f"Auto-detected database: {found}")
         return found
     elif len(dbs) > 1:
+        # If the explicit --db-path matches one, use it
+        for d in dbs:
+            if str(d.parent) == db_path or db_path in str(d.parent):
+                return str(d.parent)
         print("Multiple databases found. Specify one with --db-path:")
         for d in dbs:
             print(f"  --db-path {d.parent}")
         sys.exit(1)
 
-    # Also check for embedclipfarm_db (legacy)
-    if os.path.exists("./embedclipfarm_db"):
-        return "./embedclipfarm_db"
+    # Fall back to explicit path
+    if os.path.exists(db_path):
+        return db_path
 
-    print(f"No database found at {db_path}. Run 'index' first or specify --db-path.")
+    print(f"No database found. Run 'index' first or specify --db-path.")
     sys.exit(1)
 
 
@@ -847,6 +848,7 @@ def cmd_search(args):
 
 
 def cmd_export(args):
+    args.db_path = _find_db_path(args.db_path)
     store = VectorStore(db_path=args.db_path)
     data = store.export_all()
 
