@@ -18,7 +18,7 @@ YouTube URLs → Transcripts → Chunked Text → Vector Embeddings → Searchab
 
 3. **Embed chunks** — Each text chunk is converted into a 384-dimensional vector using [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2). These vectors capture the *meaning* of the text, not just the words.
 
-4. **Store in ChromaDB** — Embeddings are stored in a local vector database for fast cosine similarity search.
+4. **Store & export** — Embeddings are stored in ChromaDB and auto-exported as `index.json` for the web UI.
 
 5. **Search** — Your query is embedded with the same model, then compared against all stored chunks. Results are ranked by semantic similarity and link directly to the timestamp on YouTube.
 
@@ -33,54 +33,97 @@ YouTube URLs → Transcripts → Chunked Text → Vector Embeddings → Searchab
 ### Install
 
 ```bash
-pip install youtube-transcript-api chromadb sentence-transformers numpy python-dotenv
-```
-
-You also need [yt-dlp](https://github.com/yt-dlp/yt-dlp) installed:
-
-```bash
-pip install yt-dlp
-# or: brew install yt-dlp
+pip install youtube-transcript-api chromadb sentence-transformers numpy python-dotenv yt-dlp
 ```
 
 ### Set up API key (for playlists/channels)
 
 Indexing individual videos works without an API key. For playlists or channels, you need a [YouTube Data API key](https://console.cloud.google.com/apis/credentials) (free).
 
-Create a `.env` file in the project directory:
-
 ```bash
 echo "YOUTUBE_API_KEY=your_key_here" > .env
 ```
 
-That's it — the CLI reads it automatically. You can also pass `--api-key` or set the env var directly.
-
-### Index videos
+### Index a channel
 
 ```bash
-# Single video
-python embedclipfarm.py index "https://www.youtube.com/watch?v=VIDEO_ID"
-
-# Multiple videos
-python embedclipfarm.py index "https://youtube.com/watch?v=ID1" "https://youtube.com/watch?v=ID2"
-
-# Entire playlist
-python embedclipfarm.py index "https://youtube.com/playlist?list=PLxxxxx"
-
-# Channel
 python embedclipfarm.py index "@channelhandle"
+```
 
-# From a file of URLs
-python embedclipfarm.py index urls.txt
+This creates an output folder with everything you need:
 
+```
+./channelhandle/
+  ├── index.json       ← load this in the web UI to search
+  ├── transcripts/     ← readable .txt files for every video
+  │   ├── Video_Title_1_VIDEO_ID.txt
+  │   └── Video_Title_2_VIDEO_ID.txt
+  └── db/              ← ChromaDB vector database (for CLI search)
+```
+
+### Search from the terminal
+
+```bash
+python embedclipfarm.py search "your query" --db-path ./channelhandle/db
+```
+
+### Search from the web UI
+
+1. Open [the web UI](https://www.artificialnouveau.com/miniprojects/embedclipfarm/) (or `index.html` locally)
+2. Drop your `index.json` file onto the page
+3. Type a query and search — results link directly to the matching YouTube timestamp
+
+## Index Multiple Channels/Videos
+
+Each source gets its own subfolder automatically:
+
+```bash
+# Index different channels — each gets its own folder
+python embedclipfarm.py index "@channel1"
+python embedclipfarm.py index "@channel2"
+python embedclipfarm.py index "@channel3"
+
+# Index individual videos
+python embedclipfarm.py index "https://youtube.com/watch?v=VIDEO_ID"
+
+# Index a playlist
+python embedclipfarm.py index "https://youtube.com/playlist?list=PLxxxxx"
+```
+
+Result:
+
+```
+./channel1/
+  ├── index.json
+  ├── transcripts/
+  └── db/
+./channel2/
+  ├── index.json
+  ├── transcripts/
+  └── db/
+./channel3/
+  ├── index.json
+  ├── transcripts/
+  └── db/
+./VIDEO_ID/
+  ├── index.json
+  ├── transcripts/
+  └── db/
+```
+
+Load any `index.json` into the web UI to search that specific channel/video.
+
+## More Examples
+
+```bash
 # Show transcripts as they're indexed
 python embedclipfarm.py index "@channelhandle" --show-transcripts
 
-# Save transcripts to text files
-python embedclipfarm.py index "@channelhandle" --save-transcripts ./transcripts
+# Limit number of videos
+python embedclipfarm.py index "@channelhandle" --max-videos 20
 
 # With Whisper for videos without captions
-python embedclipfarm.py index "VIDEO_URL" --whisper
+python embedclipfarm.py index "@channelhandle" --whisper
 
 # With browser cookies for age-restricted videos
 python embedclipfarm.py index "@channelhandle" --cookies-from-browser chrome
@@ -88,56 +131,41 @@ python embedclipfarm.py index "@channelhandle" --cookies-from-browser chrome
 # With CLIP keyframe visual search
 python embedclipfarm.py index "VIDEO_URL" --clip
 
-# Kitchen sink — everything at once
-python embedclipfarm.py index "@channelhandle" --max-videos 20 --whisper --cookies-from-browser chrome --show-transcripts --save-transcripts ./transcripts
+# Kitchen sink
+python embedclipfarm.py index "@channelhandle" --max-videos 20 --whisper --cookies-from-browser chrome --show-transcripts
+
+# From a file of URLs
+python embedclipfarm.py index urls.txt
+
+# Multiple sources at once (merged into one index)
+python embedclipfarm.py index "VIDEO_URL1" "VIDEO_URL2" "VIDEO_URL3"
+```
+
+### View transcripts after indexing
+
+```bash
+# Print all indexed transcripts
+python embedclipfarm.py transcripts --db-path ./channelhandle/db
+
+# Print transcript for a specific video
+python embedclipfarm.py transcripts --video VIDEO_ID --db-path ./channelhandle/db
+
+# Save all transcripts as .txt files (also auto-done during indexing)
+python embedclipfarm.py transcripts --save ./output --db-path ./channelhandle/db
 ```
 
 ### Search
 
 ```bash
-# Text search (default)
-python embedclipfarm.py search "economic impact of automation"
+# Text search
+python embedclipfarm.py search "economic impact of automation" --db-path ./channelhandle/db
 
 # Visual search (requires --clip during indexing)
-python embedclipfarm.py search "person giving speech at podium" --mode visual
+python embedclipfarm.py search "person giving speech at podium" --mode visual --db-path ./channelhandle/db
 
 # Both text and visual
-python embedclipfarm.py search "climate policy" --mode both --top-k 20
+python embedclipfarm.py search "climate policy" --mode both --top-k 20 --db-path ./channelhandle/db
 ```
-
-### View transcripts
-
-```bash
-# Print all indexed transcripts
-python embedclipfarm.py transcripts
-
-# Print transcript for a specific video
-python embedclipfarm.py transcripts --video VIDEO_ID
-
-# Save all transcripts as .txt files
-python embedclipfarm.py transcripts --save ./transcripts
-```
-
-### Export for web UI
-
-```bash
-python embedclipfarm.py export --output index.json
-```
-
-Then open `index.html` in a browser and load the JSON file to search with a visual interface.
-
-## Web UI
-
-The included `index.html` is a standalone web page that provides:
-
-- **Import/Export** — Load a JSON index exported from the CLI
-- **In-browser search** — Uses [Transformers.js](https://huggingface.co/docs/transformers.js) to embed your query with the same model (all-MiniLM-L6-v2) and compute similarity client-side
-- **Scene Detection** — Upload a local video file for visual scene detection with optional Whisper transcription, all running in-browser
-- **Results** — Each result links to the exact timestamp on YouTube
-
-### Live demo
-
-[artificialnouveau.com/miniprojects/embedclipfarm](https://www.artificialnouveau.com/miniprojects/embedclipfarm/)
 
 ## CLI Reference
 
@@ -153,11 +181,10 @@ Sources:
 
 Options:
   --api-key KEY              YouTube Data API key (or set YOUTUBE_API_KEY in .env)
-  --db-path PATH             ChromaDB storage path (default: ./embedclipfarm_db)
+  --db-path PATH             Custom output path (default: auto-derived from source)
   --chunk-seconds N          Transcript chunk size in seconds (default: 30)
   --max-videos N             Max videos from playlist/channel (default: 200)
   --show-transcripts         Print transcripts to terminal during indexing
-  --save-transcripts DIR     Save raw transcripts as .txt files to a directory
   --cookies-from-browser B   Browser to extract cookies from (chrome, firefox, safari)
   --clip                     Enable CLIP keyframe embedding
   --frame-interval N         Seconds between keyframes (default: 30)
@@ -202,8 +229,7 @@ Options:
 
 ```
 embedclipfarm.py     — Single-file CLI (Python)
-index.html           — Web search UI (standalone, no build step)
-worker.js            — Optional Cloudflare Worker proxy for web auto-fetch
+index.html           — Web search UI (load index.json, search, get results)
 requirements.txt     — Python dependencies
 .env                 — YouTube API key (not committed)
 ```
@@ -213,13 +239,17 @@ requirements.txt     — Python dependencies
 ```
 ┌─────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────┐
 │  YouTube     │───→│  yt-dlp      │───→│  Sentence    │───→│ ChromaDB │
-│  URLs        │    │  transcripts │    │  Transformer │    │  vectors │
+│  URLs        │    │  transcripts │    │  Transformer │    │  + JSON  │
 └─────────────┘    └──────────────┘    │  embeddings  │    └──────────┘
                                        └──────────────┘         │
-┌─────────────┐    ┌──────────────┐    ┌──────────────┐         │
-│  Query       │───→│  Same model  │───→│  Cosine      │←───────┘
-│  "topic X"   │    │  embedding   │    │  similarity  │───→ Ranked results
-└─────────────┘    └──────────────┘    └──────────────┘    with timestamps
+                   ┌──────────────┐                             │
+                   │  index.json  │←────────────────────────────┘
+                   └──────────────┘
+                         │
+┌─────────────┐    ┌─────┴────────┐    ┌──────────────┐
+│  Query       │───→│  Web UI      │───→│  Ranked      │───→ Click to jump
+│  "topic X"   │    │  (browser)   │    │  results     │    to YouTube timestamp
+└─────────────┘    └──────────────┘    └──────────────┘
 ```
 
 ## License

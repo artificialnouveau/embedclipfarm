@@ -606,6 +606,33 @@ class VectorStore:
 # CLI commands
 # ---------------------------------------------------------------------------
 
+def _derive_project_name(sources):
+    """Derive a folder name from the source(s)."""
+    names = []
+    for source in sources:
+        s = source.strip()
+        if s.startswith("@"):
+            names.append(s[1:])
+        elif os.path.isfile(s):
+            names.append(Path(s).stem)
+        else:
+            vid = extract_video_id(s)
+            if vid:
+                names.append(vid)
+            else:
+                # Playlist or channel URL — extract key part
+                m = re.search(r'list=([a-zA-Z0-9_-]+)', s)
+                if m:
+                    names.append(m.group(1)[:20])
+                else:
+                    m = re.search(r'@([\w.-]+)', s)
+                    if m:
+                        names.append(m.group(1))
+                    else:
+                        names.append("index")
+    return "_".join(names)[:80] if names else "index"
+
+
 def cmd_index(args):
     video_ids = []
     for source in args.source:
@@ -619,6 +646,17 @@ def cmd_index(args):
         print("No video IDs found.")
         return
     print(f"Found {len(video_ids)} video(s).\n")
+
+    # Auto-derive output folder if no explicit --db-path
+    if args.db_path == "./embedclipfarm_db":
+        project_name = _derive_project_name(args.source)
+        project_dir = os.path.join(".", project_name)
+        db_path = os.path.join(project_dir, "db")
+    else:
+        project_dir = os.path.dirname(args.db_path) or "."
+        db_path = args.db_path
+
+    os.makedirs(project_dir, exist_ok=True)
 
     # Metadata
     print("Fetching metadata...")
@@ -635,7 +673,7 @@ def cmd_index(args):
     SentenceTransformer = _import_sentence_transformers()
     text_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    store = VectorStore(db_path=args.db_path)
+    store = VectorStore(db_path=db_path)
 
     print("\nIndexing transcripts...")
     for vid in video_ids:
@@ -660,26 +698,25 @@ def cmd_index(args):
         else:
             print(f"  [skipped] {vid}: no transcript")
 
-    # Save transcripts to files if requested
-    if args.save_transcripts:
-        out_dir = args.save_transcripts
-        os.makedirs(out_dir, exist_ok=True)
-        saved = 0
-        for vid in video_ids:
-            if vid not in transcripts:
-                continue
-            meta = metadata.get(vid, {})
-            title = meta.get("title", vid)
-            safe = re.sub(r'[^\w\s-]', '', title)[:60].strip().replace(' ', '_')
-            filepath = os.path.join(out_dir, f"{safe}_{vid}.txt")
-            segs = transcripts[vid]
-            with open(filepath, "w") as f:
-                f.write(f"# {title}\n")
-                f.write(f"# https://youtube.com/watch?v={vid}\n\n")
-                for s in segs:
-                    f.write(f"[{_fmt(s['start'])}] {s['text']}\n")
-            saved += 1
-        print(f"\n{saved} transcript(s) saved to {out_dir}/")
+    # Always save transcripts
+    transcript_dir = os.path.join(project_dir, "transcripts")
+    os.makedirs(transcript_dir, exist_ok=True)
+    saved = 0
+    for vid in video_ids:
+        if vid not in transcripts:
+            continue
+        meta = metadata.get(vid, {})
+        title = meta.get("title", vid)
+        safe = re.sub(r'[^\w\s-]', '', title)[:60].strip().replace(' ', '_')
+        filepath = os.path.join(transcript_dir, f"{safe}_{vid}.txt")
+        segs = transcripts[vid]
+        with open(filepath, "w") as f:
+            f.write(f"# {title}\n")
+            f.write(f"# https://youtube.com/watch?v={vid}\n\n")
+            for s in segs:
+                f.write(f"[{_fmt(s['start'])}] {s['text']}\n")
+        saved += 1
+    print(f"\n{saved} transcript(s) saved to {transcript_dir}/")
 
     # CLIP keyframes
     if args.clip:
@@ -703,9 +740,31 @@ def cmd_index(args):
 
     text_count = store.text_collection.count()
     visual_count = store.visual_collection.count()
+
+    # Auto-export index.json
+    index_path = os.path.join(project_dir, "index.json")
+    data = store.export_all()
+    def make_serializable(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, list):
+            return [make_serializable(item) for item in obj]
+        if isinstance(obj, dict):
+            return {k: make_serializable(v) for k, v in obj.items()}
+        return obj
+    data = make_serializable(data)
+    with open(index_path, "w") as f:
+        json.dump(data, f)
+    index_mb = os.path.getsize(index_path) / 1048576
+
     print(f"\nDone! Indexed {len(video_ids)} videos,"
           f" {text_count} text chunks, {visual_count} visual frames.")
-    print(f"Database: {args.db_path}")
+    print(f"\nOutput folder: {project_dir}/")
+    print(f"  index.json     ({index_mb:.1f} MB) — load in web UI to search")
+    print(f"  transcripts/   — raw transcript text files")
+    print(f"  db/            — ChromaDB vector database")
+    print(f"\nTo search: python embedclipfarm.py search \"your query\" --db-path {db_path}")
+    print(f"Web UI:    open index.html → load {index_path}")
 
 
 def cmd_search(args):
@@ -905,8 +964,6 @@ def main():
         help="Browser to extract cookies from for age-restricted videos (e.g. chrome, firefox, safari)")
     idx.add_argument("--show-transcripts", action="store_true",
         help="Print transcripts to terminal during indexing")
-    idx.add_argument("--save-transcripts", default=None,
-        help="Save raw transcripts to a directory (e.g. --save-transcripts ./transcripts)")
 
     # --- search ---
     srch = sub.add_parser("search", help="Search indexed videos")
