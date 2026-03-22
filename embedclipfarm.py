@@ -883,7 +883,7 @@ def cmd_index(args):
                                      whisper_model_name=args.whisper_model,
                                      cookies_browser=args.cookies_from_browser,
                                      speaker_id=args.speaker_id,
-                                     punctuate=args.punctuate)
+                                     punctuate=not args.no_punctuate)
 
     # Text embeddings
     print("\nLoading text embedding model...")
@@ -1469,8 +1469,8 @@ def main():
         help="Whisper model size (default: base)")
     idx.add_argument("--speaker-id", action="store_true",
         help="Enable speaker diarization with Whisper (requires pyannote-audio and HF_TOKEN)")
-    idx.add_argument("--punctuate", action="store_true",
-        help="Add punctuation to transcripts (requires deepmultilingualpunctuation)")
+    idx.add_argument("--no-punctuate", action="store_true",
+        help="Disable automatic punctuation restoration")
     idx.add_argument("--vision", default=None, choices=["gemini", "claude"],
         help="Annotate keyframes with a vision API: gemini or claude")
     idx.add_argument("--vision-key", default=None,
