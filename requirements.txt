@@ -14,3 +14,9 @@ Pillow
 
 # Optional: Whisper speech-to-text
 faster-whisper
+
+# Optional: punctuation restoration
+deepmultilingualpunctuation
+
+# Optional: speaker diarization
+pyannote-audio

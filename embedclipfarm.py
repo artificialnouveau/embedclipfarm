@@ -267,8 +267,32 @@ def _fetch_metadata_ytdlp(video_id):
 # Transcript
 # ---------------------------------------------------------------------------
 
+def _punctuate_segments(segments):
+    """Add punctuation to transcript segments using a lightweight model."""
+    try:
+        from deepmultilingualpunctuation import PunctuationModel
+    except ImportError:
+        print("    [punctuate] Install: pip install deepmultilingualpunctuation")
+        return segments
+
+    print("    [punctuate] Loading punctuation model...")
+    model = PunctuationModel()
+
+    # Process in batches — combine all text, punctuate, split back
+    for seg in segments:
+        text = seg["text"].strip()
+        if text and not text[-1] in ".!?,;:":
+            try:
+                seg["text"] = model.restore_punctuation(text)
+            except Exception:
+                pass  # keep original if punctuation fails
+
+    print("    [punctuate] Done.")
+    return segments
+
+
 def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base",
-                      cookies_browser=None, speaker_id=False):
+                      cookies_browser=None, speaker_id=False, punctuate=False):
     """Fetch transcripts for videos. Returns {video_id: [segments]}.
 
     Tries yt-dlp first (most reliable), then youtube-transcript-api,
@@ -316,6 +340,12 @@ def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base",
                     print(f"  [whisper] {vid}: transcription failed")
             except Exception as e:
                 print(f"  [whisper] {vid}: error - {e}")
+
+    # Add punctuation if requested
+    if punctuate and transcripts:
+        print("\nAdding punctuation...")
+        for vid, segments in transcripts.items():
+            transcripts[vid] = _punctuate_segments(segments)
 
     return transcripts
 
@@ -852,7 +882,8 @@ def cmd_index(args):
     transcripts = fetch_transcripts(video_ids, use_whisper=args.whisper,
                                      whisper_model_name=args.whisper_model,
                                      cookies_browser=args.cookies_from_browser,
-                                     speaker_id=args.speaker_id)
+                                     speaker_id=args.speaker_id,
+                                     punctuate=args.punctuate)
 
     # Text embeddings
     print("\nLoading text embedding model...")
@@ -1438,6 +1469,8 @@ def main():
         help="Whisper model size (default: base)")
     idx.add_argument("--speaker-id", action="store_true",
         help="Enable speaker diarization with Whisper (requires pyannote-audio and HF_TOKEN)")
+    idx.add_argument("--punctuate", action="store_true",
+        help="Add punctuation to transcripts (requires deepmultilingualpunctuation)")
     idx.add_argument("--vision", default=None, choices=["gemini", "claude"],
         help="Annotate keyframes with a vision API: gemini or claude")
     idx.add_argument("--vision-key", default=None,
