@@ -547,65 +547,116 @@ def embed_keyframes(frames, clip_model, preprocess, tokenizer):
 
 
 # ---------------------------------------------------------------------------
-# Gemini scene annotation
+# Vision API scene annotation (Gemini / Claude / CLIP)
 # ---------------------------------------------------------------------------
 
-def annotate_keyframes_gemini(frames, api_key):
-    """Use Gemini to generate rich text descriptions of keyframes."""
+SCENE_PROMPT = (
+    "Describe this video frame in detail for search indexing. "
+    "Include: what's happening, who/what is visible, the setting, "
+    "any text on screen, emotions, actions, and visual style. "
+    "Be specific and descriptive in 2-3 sentences."
+)
+
+
+def _frame_to_base64(frame):
+    """Convert a PIL image to base64 JPEG."""
     import base64
     import io
-    try:
-        import requests
-    except ImportError:
-        import urllib.request
-        requests = None
+    buf = io.BytesIO()
+    frame["image"].save(buf, format="JPEG", quality=85)
+    return base64.b64encode(buf.getvalue()).decode()
 
-    Image = _import_pil()
+
+def annotate_keyframes(frames, provider, api_key):
+    """Annotate keyframes using the specified vision API provider."""
+    if provider == "gemini":
+        return _annotate_gemini(frames, api_key)
+    elif provider == "claude":
+        return _annotate_claude(frames, api_key)
+    else:
+        raise ValueError(f"Unknown vision provider: {provider}")
+
+
+def _annotate_gemini(frames, api_key):
+    """Use Gemini to generate rich text descriptions of keyframes."""
+    import urllib.request
 
     descriptions = []
-    for i, frame in enumerate(frames):
-        # Convert PIL image to base64 JPEG
-        buf = io.BytesIO()
-        frame["image"].save(buf, format="JPEG", quality=85)
-        img_b64 = base64.b64encode(buf.getvalue()).decode()
-
-        prompt = (
-            "Describe this video frame in detail for search indexing. "
-            "Include: what's happening, who/what is visible, the setting, "
-            "any text on screen, emotions, actions, and visual style. "
-            "Be specific and descriptive in 2-3 sentences."
-        )
-
+    for frame in frames:
+        img_b64 = _frame_to_base64(frame)
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": prompt},
+                    {"text": SCENE_PROMPT},
                     {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
                 ]
             }]
         }
-
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
 
         try:
-            if requests:
-                resp = requests.post(url, json=payload, timeout=30)
-                data = resp.json()
-            else:
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode(),
-                    headers={"Content-Type": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = json.loads(resp.read())
-
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
             text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
             descriptions.append(text)
             print(f"    [{_fmt(frame['timestamp'])}] {text[:100]}...")
         except Exception as e:
             descriptions.append(f"Video frame at {_fmt(frame['timestamp'])}")
             print(f"    [{_fmt(frame['timestamp'])}] Gemini error: {e}")
+
+    return descriptions
+
+
+def _annotate_claude(frames, api_key):
+    """Use Claude (Anthropic) to generate rich text descriptions of keyframes."""
+    import urllib.request
+
+    descriptions = []
+    for frame in frames:
+        img_b64 = _frame_to_base64(frame)
+        payload = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 300,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img_b64,
+                        },
+                    },
+                    {"type": "text", "text": SCENE_PROMPT},
+                ],
+            }],
+        }
+        url = "https://api.anthropic.com/v1/messages"
+
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+            text = data["content"][0]["text"].strip()
+            descriptions.append(text)
+            print(f"    [{_fmt(frame['timestamp'])}] {text[:100]}...")
+        except Exception as e:
+            descriptions.append(f"Video frame at {_fmt(frame['timestamp'])}")
+            print(f"    [{_fmt(frame['timestamp'])}] Claude error: {e}")
 
     return descriptions
 
@@ -854,24 +905,34 @@ def cmd_index(args):
     print(f"\n{saved} transcript(s) saved to {transcript_dir}/")
 
     # Visual keyframe analysis
-    if args.clip or args.gemini:
-        if args.gemini:
-            gemini_key = args.gemini_key or os.environ.get("GEMINI_API_KEY")
-            if not gemini_key:
-                print("\nGemini API key required. Set GEMINI_API_KEY in .env or use --gemini-key.")
+    if args.clip or args.vision:
+        if args.vision:
+            provider = args.vision  # "gemini" or "claude"
+            if provider == "gemini":
+                vision_key = args.vision_key or os.environ.get("GEMINI_API_KEY")
+                key_name = "GEMINI_API_KEY"
+            elif provider == "claude":
+                vision_key = args.vision_key or os.environ.get("ANTHROPIC_API_KEY")
+                key_name = "ANTHROPIC_API_KEY"
             else:
-                print("\nExtracting keyframes and annotating with Gemini...")
+                vision_key = None
+                key_name = ""
+
+            if not vision_key:
+                print(f"\n{provider.capitalize()} API key required. Set {key_name} in .env or use --vision-key.")
+            else:
+                print(f"\nExtracting keyframes and annotating with {provider.capitalize()}...")
                 for vid in video_ids:
                     frames = extract_keyframes(vid, interval=args.frame_interval,
                                                 max_frames=args.max_frames)
                     if frames:
                         meta = metadata.get(vid, {})
-                        print(f"  [gemini] {vid} — {len(frames)} frames — {meta.get('title', '')[:40]}")
-                        descriptions = annotate_keyframes_gemini(frames, gemini_key)
+                        print(f"  [{provider}] {vid} — {len(frames)} frames — {meta.get('title', '')[:40]}")
+                        descriptions = annotate_keyframes(frames, provider, vision_key)
                         # Embed descriptions as text chunks (searchable with same model)
                         for j, (frame, desc) in enumerate(zip(frames, descriptions)):
                             emb = embed_texts([desc], text_model)[0]
-                            chunk_id = f"{vid}_g_{j}"
+                            chunk_id = f"{vid}_v_{j}"
                             store.text_collection.upsert(
                                 ids=[chunk_id],
                                 documents=[desc],
@@ -880,10 +941,10 @@ def cmd_index(args):
                                     "video_id": vid,
                                     "start": frame["timestamp"],
                                     "end": frame["timestamp"] + args.frame_interval,
-                                    "type": "gemini",
+                                    "type": provider,
                                 }],
                             )
-                        print(f"  [indexed] {vid}: {len(frames)} Gemini scene descriptions")
+                        print(f"  [indexed] {vid}: {len(frames)} {provider.capitalize()} scene descriptions")
 
         if args.clip:
             print("\nLoading CLIP model...")
@@ -1366,10 +1427,10 @@ def main():
         help="Whisper model size (default: base)")
     idx.add_argument("--speaker-id", action="store_true",
         help="Enable speaker diarization with Whisper (requires pyannote-audio and HF_TOKEN)")
-    idx.add_argument("--gemini", action="store_true",
-        help="Use Gemini to annotate keyframes with rich text descriptions (searchable)")
-    idx.add_argument("--gemini-key", default=None,
-        help="Gemini API key (or set GEMINI_API_KEY in .env)")
+    idx.add_argument("--vision", default=None, choices=["gemini", "claude"],
+        help="Annotate keyframes with a vision API: gemini or claude")
+    idx.add_argument("--vision-key", default=None,
+        help="API key for vision provider (or set GEMINI_API_KEY / ANTHROPIC_API_KEY in .env)")
     idx.add_argument("--cookies-from-browser", default=None,
         help="Browser to extract cookies from for age-restricted videos (e.g. chrome, firefox, safari)")
     idx.add_argument("--show-transcripts", action="store_true",

@@ -81,9 +81,10 @@
           <strong style="color:#fff;">What gets analyzed:</strong>
           The primary analysis is on <strong style="color:#e040fb;">speech transcripts</strong> — auto-generated captions pulled from YouTube via yt-dlp,
           or transcribed locally using <strong style="color:#e040fb;">Whisper AI</strong> for videos without captions.
-          Optionally, <strong style="color:#e040fb;">Gemini</strong> can annotate keyframes with rich text descriptions for visual search
-          (e.g. "person at a podium") — enable with <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--gemini</code> during indexing.
-          Or use <strong style="color:#e040fb;">CLIP embeddings</strong> with <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--clip</code> for a local-only alternative.
+          Optionally, a <strong style="color:#e040fb;">vision API</strong> can annotate keyframes with rich text descriptions for visual search
+          (e.g. "person at a podium") — use <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--vision gemini</code> or
+          <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--vision claude</code> during indexing.
+          Or use <strong style="color:#e040fb;">CLIP embeddings</strong> with <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--clip</code> for a fully local alternative (no API key needed).
           For videos without captions, add <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--whisper</code> to transcribe audio locally using Whisper AI.
           <strong style="color:#e040fb;">Scene detection</strong> uses frame-by-frame analysis to identify visual cut points
           in the video, splitting it into distinct scenes that can be individually searched and downloaded as clips.
@@ -337,7 +338,8 @@
         var strength = r.score >= 0.3 ? "strong" : "related";
         var strengthColor = r.score >= 0.3 ? "#4caf50" : "#ff9800";
         var sourceType = r.metadata.type || "text";
-        var sourceLabel = sourceType === "gemini" ? ' <span style="color:#4a9eff;">gemini</span>' : sourceType === "whisper" ? ' <span style="color:#ff9800;">whisper</span>' : "";
+        var sourceLabels = { gemini: "#4a9eff", claude: "#cc785c", whisper: "#ff9800" };
+        var sourceLabel = sourceLabels[sourceType] ? ' <span style="color:' + sourceLabels[sourceType] + ';">' + sourceType + '</span>' : "";
         sc.innerHTML = '<span style="color:' + strengthColor + ';font-weight:600;">' + strength + '</span> ' + r.score.toFixed(3) + sourceLabel + "  \u2022  " + fmtTime(ts) + " → " + fmtTime(endTs);
         body.appendChild(sc);
 
