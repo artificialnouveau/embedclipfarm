@@ -178,11 +178,21 @@ python embedclipfarm.py index "@channel" --vision gemini
 # With Claude scene annotation
 python embedclipfarm.py index "@channel" --vision claude
 
+# With a custom vision prompt (focus on specific aspects)
+python embedclipfarm.py index "@channel" --vision gemini --vision-prompt "Describe the fashion and clothing visible in this frame. Note colors, styles, brands, and accessories."
+
+# More custom prompt examples
+python embedclipfarm.py index "@channel" --vision claude --vision-prompt "List all text visible on screen. Describe any graphics, logos, or data visualizations."
+python embedclipfarm.py index "@channel" --vision gemini --vision-prompt "Describe the emotions, body language, and facial expressions of people in this frame."
+
 # With CLIP visual embeddings (local, no API)
 python embedclipfarm.py index "@channel" --clip
 
 # With browser cookies for age-restricted videos
 python embedclipfarm.py index "@channel" --cookies-from-browser chrome
+
+# Disable automatic punctuation
+python embedclipfarm.py index "@channel" --no-punctuate
 
 # Everything at once
 python embedclipfarm.py index "@channel" --max-videos 20 --whisper --speaker-id --vision gemini --cookies-from-browser chrome --show-transcripts
@@ -242,12 +252,14 @@ Options:
   --cookies-from-browser B   Browser for age-restricted videos (chrome/firefox/safari)
   --vision {gemini,claude}   Annotate keyframes with vision API
   --vision-key KEY           API key for vision (or set in .env)
+  --vision-prompt TEXT       Custom prompt for scene annotation (see below)
   --clip                     CLIP keyframe embeddings (local, no API)
   --frame-interval N         Seconds between keyframes (default: 30)
   --max-frames N             Max keyframes per video (default: 20)
   --whisper                  Whisper for videos without captions
   --whisper-model SIZE       tiny/base/small/medium/large-v3 (default: base)
   --speaker-id               Speaker diarization (requires pyannote-audio + HF_TOKEN)
+  --no-punctuate             Disable automatic punctuation (on by default)
 ```
 
 ### `search`
