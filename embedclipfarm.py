@@ -89,15 +89,38 @@ def extract_video_id(text):
 
 def resolve_source(source, api_key=None, max_results=200):
     """Resolve a source string into a list of video IDs."""
-    # File with URLs/IDs
+    # File with URLs/IDs (txt, csv, json)
     if os.path.isfile(source):
-        with open(source) as f:
-            lines = f.read().splitlines()
+        ext = source.lower().rsplit(".", 1)[-1] if "." in source else ""
         ids = []
-        for line in lines:
-            vid = extract_video_id(line)
-            if vid and vid not in ids:
-                ids.append(vid)
+
+        if ext == "json":
+            with open(source) as f:
+                data = json.load(f)
+            # Support: list of URLs/IDs, or list of objects with url/id/video_id keys
+            items = data if isinstance(data, list) else data.get("videos", data.get("urls", []))
+            for item in items:
+                text = item if isinstance(item, str) else (
+                    item.get("url") or item.get("id") or item.get("video_id") or "")
+                vid = extract_video_id(str(text))
+                if vid and vid not in ids:
+                    ids.append(vid)
+        elif ext == "csv":
+            with open(source) as f:
+                for line in f:
+                    for cell in line.split(","):
+                        vid = extract_video_id(cell.strip().strip('"').strip("'"))
+                        if vid and vid not in ids:
+                            ids.append(vid)
+        else:
+            # Plain text — one URL/ID per line
+            with open(source) as f:
+                for line in f:
+                    vid = extract_video_id(line.strip())
+                    if vid and vid not in ids:
+                        ids.append(vid)
+
+        print(f"  Loaded {len(ids)} video(s) from {source}")
         return ids
 
     # Single video
@@ -245,7 +268,7 @@ def _fetch_metadata_ytdlp(video_id):
 # ---------------------------------------------------------------------------
 
 def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base",
-                      cookies_browser=None):
+                      cookies_browser=None, speaker_id=False):
     """Fetch transcripts for videos. Returns {video_id: [segments]}.
 
     Tries yt-dlp first (most reliable), then youtube-transcript-api,
@@ -284,7 +307,8 @@ def fetch_transcripts(video_ids, use_whisper=False, whisper_model_name="base",
         for vid in failed:
             try:
                 segments = _whisper_transcribe(vid, model,
-                                               cookies_browser=cookies_browser)
+                                               cookies_browser=cookies_browser,
+                                               speaker_id=speaker_id)
                 if segments:
                     transcripts[vid] = segments
                     print(f"  [whisper] {vid}: {len(segments)} segments")
@@ -345,7 +369,38 @@ def _fetch_transcript_ytdlp(video_id, cookies_browser=None):
         return None
 
 
-def _whisper_transcribe(video_id, model, cookies_browser=None):
+def _diarize(audio_path):
+    """Run speaker diarization on an audio file. Returns {(start, end): speaker_label}."""
+    try:
+        from pyannote.audio import Pipeline
+        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1",
+                                             use_auth_token=os.environ.get("HF_TOKEN"))
+        diarization = pipeline(audio_path)
+        speaker_map = {}
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            speaker_map[(turn.start, turn.end)] = speaker
+        return speaker_map
+    except ImportError:
+        # Fallback: simple energy-based speaker change detection
+        # Just return empty — user needs pyannote for real diarization
+        print("    [speakers] Install pyannote-audio for speaker ID: pip install pyannote-audio")
+        print("    [speakers] Also set HF_TOKEN in .env (required by pyannote)")
+        return {}
+
+
+def _get_speaker(seg_start, seg_end, speaker_map):
+    """Find the dominant speaker for a segment."""
+    best_speaker = None
+    best_overlap = 0
+    for (start, end), speaker in speaker_map.items():
+        overlap = max(0, min(seg_end, end) - max(seg_start, start))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_speaker = speaker
+    return best_speaker
+
+
+def _whisper_transcribe(video_id, model, cookies_browser=None, speaker_id=False):
     """Download audio via yt-dlp and transcribe with Whisper."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio.wav")
@@ -366,13 +421,28 @@ def _whisper_transcribe(video_id, model, cookies_browser=None):
         if not os.path.exists(audio_path):
             return None
 
+        # Speaker diarization if requested
+        speaker_map = {}
+        if speaker_id:
+            try:
+                speaker_map = _diarize(audio_path)
+                print(f"    [speakers] found {len(set(speaker_map.values()))} speaker(s)")
+            except Exception as e:
+                print(f"    [speakers] diarization failed: {e}")
+
         segments_iter, _ = model.transcribe(audio_path, beam_size=5)
         segments = []
         for seg in segments_iter:
+            text = seg.text.strip()
+            # Tag with speaker if available
+            if speaker_map:
+                speaker = _get_speaker(seg.start, seg.end, speaker_map)
+                if speaker:
+                    text = f"[{speaker}] {text}"
             segments.append({
                 "start": seg.start,
                 "duration": seg.end - seg.start,
-                "text": seg.text.strip(),
+                "text": text,
             })
         return segments
 
@@ -474,6 +544,70 @@ def embed_keyframes(frames, clip_model, preprocess, tokenizer):
             emb = emb / emb.norm(dim=-1, keepdim=True)
             embeddings.append(emb.squeeze().cpu().numpy().tolist())
     return embeddings
+
+
+# ---------------------------------------------------------------------------
+# Gemini scene annotation
+# ---------------------------------------------------------------------------
+
+def annotate_keyframes_gemini(frames, api_key):
+    """Use Gemini to generate rich text descriptions of keyframes."""
+    import base64
+    import io
+    try:
+        import requests
+    except ImportError:
+        import urllib.request
+        requests = None
+
+    Image = _import_pil()
+
+    descriptions = []
+    for i, frame in enumerate(frames):
+        # Convert PIL image to base64 JPEG
+        buf = io.BytesIO()
+        frame["image"].save(buf, format="JPEG", quality=85)
+        img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        prompt = (
+            "Describe this video frame in detail for search indexing. "
+            "Include: what's happening, who/what is visible, the setting, "
+            "any text on screen, emotions, actions, and visual style. "
+            "Be specific and descriptive in 2-3 sentences."
+        )
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
+                ]
+            }]
+        }
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+
+        try:
+            if requests:
+                resp = requests.post(url, json=payload, timeout=30)
+                data = resp.json()
+            else:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            descriptions.append(text)
+            print(f"    [{_fmt(frame['timestamp'])}] {text[:100]}...")
+        except Exception as e:
+            descriptions.append(f"Video frame at {_fmt(frame['timestamp'])}")
+            print(f"    [{_fmt(frame['timestamp'])}] Gemini error: {e}")
+
+    return descriptions
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +800,8 @@ def cmd_index(args):
     print("\nFetching transcripts...")
     transcripts = fetch_transcripts(video_ids, use_whisper=args.whisper,
                                      whisper_model_name=args.whisper_model,
-                                     cookies_browser=args.cookies_from_browser)
+                                     cookies_browser=args.cookies_from_browser,
+                                     speaker_id=args.speaker_id)
 
     # Text embeddings
     print("\nLoading text embedding model...")
@@ -718,25 +853,56 @@ def cmd_index(args):
         saved += 1
     print(f"\n{saved} transcript(s) saved to {transcript_dir}/")
 
-    # CLIP keyframes
-    if args.clip:
-        print("\nLoading CLIP model...")
-        open_clip = _import_clip()
-        import torch
-        clip_model, _, preprocess = open_clip.create_model_and_transforms(
-            "ViT-B-32", pretrained="laion2b_s34b_b79k"
-        )
-        clip_model.eval()
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+    # Visual keyframe analysis
+    if args.clip or args.gemini:
+        if args.gemini:
+            gemini_key = args.gemini_key or os.environ.get("GEMINI_API_KEY")
+            if not gemini_key:
+                print("\nGemini API key required. Set GEMINI_API_KEY in .env or use --gemini-key.")
+            else:
+                print("\nExtracting keyframes and annotating with Gemini...")
+                for vid in video_ids:
+                    frames = extract_keyframes(vid, interval=args.frame_interval,
+                                                max_frames=args.max_frames)
+                    if frames:
+                        meta = metadata.get(vid, {})
+                        print(f"  [gemini] {vid} — {len(frames)} frames — {meta.get('title', '')[:40]}")
+                        descriptions = annotate_keyframes_gemini(frames, gemini_key)
+                        # Embed descriptions as text chunks (searchable with same model)
+                        for j, (frame, desc) in enumerate(zip(frames, descriptions)):
+                            emb = embed_texts([desc], text_model)[0]
+                            chunk_id = f"{vid}_g_{j}"
+                            store.text_collection.upsert(
+                                ids=[chunk_id],
+                                documents=[desc],
+                                embeddings=[emb],
+                                metadatas=[{
+                                    "video_id": vid,
+                                    "start": frame["timestamp"],
+                                    "end": frame["timestamp"] + args.frame_interval,
+                                    "type": "gemini",
+                                }],
+                            )
+                        print(f"  [indexed] {vid}: {len(frames)} Gemini scene descriptions")
 
-        print("\nExtracting and embedding keyframes...")
-        for vid in video_ids:
-            frames = extract_keyframes(vid, interval=args.frame_interval,
-                                        max_frames=args.max_frames)
-            if frames:
-                embeddings = embed_keyframes(frames, clip_model, preprocess, tokenizer)
-                store.add_visual_frames(vid, frames, embeddings)
-                print(f"  [indexed] {vid}: {len(frames)} visual frames")
+        if args.clip:
+            print("\nLoading CLIP model...")
+            open_clip = _import_clip()
+            import torch
+            clip_model, _, preprocess = open_clip.create_model_and_transforms(
+                "ViT-B-32", pretrained="laion2b_s34b_b79k"
+            )
+            clip_model.eval()
+            tokenizer = open_clip.get_tokenizer("ViT-B-32")
+
+            print("\nExtracting and embedding keyframes with CLIP...")
+            for vid in video_ids:
+                frames = extract_keyframes(vid, interval=args.frame_interval,
+                                            max_frames=args.max_frames)
+                if frames:
+                    embeddings = embed_keyframes(frames, clip_model, preprocess, tokenizer)
+                    store.add_visual_frames(vid, frames, embeddings)
+                    print(f"  [indexed] {vid}: {len(frames)} CLIP visual frames")
 
     text_count = store.text_collection.count()
     visual_count = store.visual_collection.count()
@@ -1062,6 +1228,109 @@ def _fmt(seconds):
 
 
 # ---------------------------------------------------------------------------
+# Local server for web UI clip downloads
+# ---------------------------------------------------------------------------
+
+def cmd_serve(args):
+    """Run a local server that serves the web UI and handles clip downloads."""
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
+    from urllib.parse import urlparse, parse_qs
+    import threading
+
+    port = args.port
+    serve_dir = os.path.dirname(os.path.abspath(__file__))
+
+    class ClipHandler(SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=serve_dir, **kw)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+
+            if parsed.path == "/api/clip":
+                self.handle_clip(parse_qs(parsed.query))
+            elif parsed.path == "/api/status":
+                self.send_json({"status": "ok"})
+            else:
+                super().do_GET()
+
+        def handle_clip(self, params):
+            video_id = params.get("video", [None])[0]
+            start = params.get("start", [None])[0]
+            end = params.get("end", [None])[0]
+
+            if not video_id or start is None or end is None:
+                self.send_json({"error": "Missing video, start, or end"}, 400)
+                return
+
+            start_f = float(start)
+            end_f = float(end)
+            actual_start = max(0, start_f - 2)
+            actual_end = end_f + 2
+
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            with tempfile.TemporaryDirectory() as tmpdir:
+                output_path = os.path.join(tmpdir, f"{video_id}_{int(start_f)}s-{int(end_f)}s.mp4")
+                cmd = [
+                    "yt-dlp", "--remote-components", "ejs:github",
+                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                    "--download-sections", f"*{actual_start}-{actual_end}",
+                    "--force-keyframes-at-cuts",
+                    "-o", output_path,
+                    url,
+                ]
+                if args.cookies_from_browser:
+                    cmd.insert(1, f"--cookies-from-browser={args.cookies_from_browser}")
+
+                print(f"  Downloading clip: {video_id} [{_fmt(start_f)} → {_fmt(end_f)}]")
+                result = subprocess.run(cmd, capture_output=True)
+
+                if result.returncode != 0 or not os.path.exists(output_path):
+                    self.send_json({"error": "Download failed"}, 500)
+                    return
+
+                # Send the file
+                file_size = os.path.getsize(output_path)
+                filename = f"{video_id}_{int(start_f)}s-{int(end_f)}s.mp4"
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                self.send_header("Content-Length", str(file_size))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                with open(output_path, "rb") as f:
+                    self.wfile.write(f.read())
+                print(f"  Sent: {filename} ({file_size / 1048576:.1f} MB)")
+
+        def send_json(self, data, status=200):
+            body = json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, fmt, *a):
+            # Suppress routine GET logs, keep clip logs
+            if "/api/" in (a[0] if a else ""):
+                super().log_message(fmt, *a)
+
+    server = HTTPServer(("127.0.0.1", port), ClipHandler)
+    print(f"\nEmbedClipFarm server running at http://localhost:{port}")
+    print(f"Open this URL in your browser to search and download clips.")
+    print(f"Press Ctrl+C to stop.\n")
+
+    import webbrowser
+    webbrowser.open(f"http://localhost:{port}/index.html")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+        server.server_close()
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1095,6 +1364,12 @@ def main():
     idx.add_argument("--whisper-model", default="base",
         choices=["tiny", "base", "small", "medium", "large-v3"],
         help="Whisper model size (default: base)")
+    idx.add_argument("--speaker-id", action="store_true",
+        help="Enable speaker diarization with Whisper (requires pyannote-audio and HF_TOKEN)")
+    idx.add_argument("--gemini", action="store_true",
+        help="Use Gemini to annotate keyframes with rich text descriptions (searchable)")
+    idx.add_argument("--gemini-key", default=None,
+        help="Gemini API key (or set GEMINI_API_KEY in .env)")
     idx.add_argument("--cookies-from-browser", default=None,
         help="Browser to extract cookies from for age-restricted videos (e.g. chrome, firefox, safari)")
     idx.add_argument("--show-transcripts", action="store_true",

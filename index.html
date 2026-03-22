@@ -67,7 +67,6 @@
     <h1>EmbedClipFarm</h1>
     <p class="subtitle">Semantic search over YouTube content — search by meaning, not just keywords.</p>
 
-    <div class="index-stats" id="index-stats"></div>
     <div class="model-status" id="model-status"></div>
 
     <!-- About section -->
@@ -79,15 +78,27 @@
           moments even if those exact words are never spoken.
         </p>
         <p style="color:#aaa;font-size:0.85rem;margin-bottom:12px;">
-          <strong style="color:#fff;">How it works:</strong> The CLI tool downloads transcripts from YouTube, splits them into
-          30-second chunks, and converts each chunk into a vector embedding that captures its meaning.
-          When you search here, your query is embedded the same way, and results are ranked by
+          <strong style="color:#fff;">What gets analyzed:</strong>
+          The primary analysis is on <strong style="color:#e040fb;">speech transcripts</strong> — auto-generated captions pulled from YouTube via yt-dlp,
+          or transcribed locally using <strong style="color:#e040fb;">Whisper AI</strong> for videos without captions.
+          Optionally, <strong style="color:#e040fb;">Gemini</strong> can annotate keyframes with rich text descriptions for visual search
+          (e.g. "person at a podium") — enable with <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--gemini</code> during indexing.
+          Or use <strong style="color:#e040fb;">CLIP embeddings</strong> with <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--clip</code> for a local-only alternative.
+          For videos without captions, add <code style="background:#282828;color:#4caf50;padding:1px 4px;border-radius:2px;">--whisper</code> to transcribe audio locally using Whisper AI.
+          <strong style="color:#e040fb;">Scene detection</strong> uses frame-by-frame analysis to identify visual cut points
+          in the video, splitting it into distinct scenes that can be individually searched and downloaded as clips.
+        </p>
+        <p style="color:#aaa;font-size:0.85rem;margin-bottom:12px;">
+          <strong style="color:#fff;">How it works:</strong> Transcripts are split into ~30-second chunks, and each chunk is converted into
+          a 384-dimensional vector embedding (using all-MiniLM-L6-v2) that captures its semantic meaning.
+          When you search, your query is embedded the same way and results are ranked by
           <strong style="color:#e040fb;">cosine similarity</strong> — how close your query's meaning is to each chunk's meaning.
         </p>
         <p style="color:#aaa;font-size:0.85rem;margin-bottom:12px;">
-          <strong style="color:#fff;">Scores:</strong> Results show a similarity score from 0 to 1.
-          Higher is more relevant. Scores above <strong>0.3</strong> are usually strong matches,
-          <strong>0.15–0.3</strong> are related, below <strong>0.15</strong> is likely noise.
+          <strong style="color:#fff;">Scores:</strong>
+          <span style="color:#4caf50;font-weight:600;">strong</span> (>= 0.3) — high confidence match,
+          <span style="color:#ff9800;font-weight:600;">related</span> (0.15–0.3) — topically related,
+          below 0.15 is filtered out as noise.
         </p>
         <p style="color:#aaa;font-size:0.85rem;margin-bottom:0;">
           <strong style="color:#fff;">Before using this page:</strong> Run the CLI to index a YouTube channel or videos.
@@ -97,21 +108,34 @@
         </p>
       </div>
 
-      <div style="background:#1a1a1a;border:1px solid #282828;border-radius:8px;padding:16px;font-size:0.8rem;color:#888;line-height:1.7;">
-        <strong style="color:#fff;">Quick setup:</strong><br>
-        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">pip install youtube-transcript-api chromadb sentence-transformers numpy python-dotenv yt-dlp</code><br>
+      <div style="background:#1a1a1a;border:1px solid #282828;border-radius:8px;padding:16px;font-size:0.8rem;color:#888;line-height:1.9;">
+        <strong style="color:#fff;">1. Install &amp; index:</strong><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">pip install youtube-transcript-api chromadb sentence-transformers numpy python-dotenv yt-dlp</code><br><br>
+        <span style="color:#aaa;">Index a single video:</span><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py index "https://youtube.com/watch?v=VIDEO_ID"</code><br>
+        <span style="color:#aaa;">Index multiple videos:</span><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py index "URL1" "URL2" "URL3"</code><br>
+        <span style="color:#aaa;">Index a channel:</span><br>
         <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py index "@channelname" --max-videos 20</code><br>
-        Then load the generated <code style="background:#282828;color:#e040fb;padding:1px 4px;border-radius:2px;">channelname/index.json</code> below.
+        <span style="color:#aaa;">Index a playlist:</span><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py index "https://youtube.com/playlist?list=PLxxxxx"</code><br>
+        <span style="color:#aaa;">Index from a file of URLs:</span><br>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py index urls.txt</code><br><br>
+        <span style="color:#aaa;">Each creates a folder (named after the source) containing <code style="background:#282828;color:#e040fb;padding:1px 4px;border-radius:2px;">index.json</code> + transcripts. Check the CLI output for the exact folder path, then load the index.json below.</span>
       </div>
 
       <div style="background:#1a1a1a;border:1px solid #282828;border-radius:8px;padding:16px;font-size:0.8rem;color:#888;line-height:1.9;margin-top:12px;">
-        <strong style="color:#fff;">Download clips from the CLI:</strong><br>
+        <strong style="color:#fff;">2. Download clips:</strong><br>
         <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py clip VIDEO_ID --start 10 --end 41</code>
         <span style="color:#555;margin-left:6px;">Download a specific segment</span><br>
-        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py search "slugs" --download ./clips</code>
+        <code style="background:#282828;color:#4caf50;padding:2px 6px;border-radius:3px;">python embedclipfarm.py search "query" --download ./clips</code>
         <span style="color:#555;margin-left:6px;">Search and download all matching clips</span><br>
         <span style="color:#aaa;">Each search result below includes a <strong style="color:#e040fb;">Copy clip command</strong> button — paste it into your terminal to download that exact segment.</span>
       </div>
+
+      <p style="font-size:0.8rem;color:#555;margin-top:12px;">
+        Full docs: <a href="https://github.com/artificialnouveau/embedclipfarm" target="_blank" rel="noopener noreferrer" style="color:#e040fb;">github.com/artificialnouveau/embedclipfarm</a>
+      </p>
     </div>
 
     <!-- Load index -->
@@ -119,6 +143,18 @@
       <p style="font-size:1.1rem;color:#fff;margin-bottom:6px;">Load index.json</p>
       <p style="color:#888;font-size:0.9rem;">Drop your index.json file here, or click to browse</p>
       <input type="file" id="index-file" accept=".json">
+    </div>
+
+    <!-- Success banner (hidden until index loaded) -->
+    <div id="loaded-banner" style="display:none;background:#1a2e1a;border:1px solid #2d5a2d;border-radius:8px;padding:14px 20px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:1.3rem;">&#9989;</span>
+        <div>
+          <strong style="color:#4caf50;font-size:0.95rem;" id="loaded-title">Index loaded!</strong>
+          <span id="loaded-detail" style="color:#8bc38b;font-size:0.85rem;margin-left:8px;"></span>
+        </div>
+        <button onclick="loadAnother()" style="margin-left:auto;padding:5px 12px;font-size:0.78rem;background:#282828;color:#ccc;border:1px solid #444;border-radius:4px;cursor:pointer;">Load different index</button>
+      </div>
     </div>
 
     <!-- Search (hidden until index loaded) -->
@@ -130,7 +166,6 @@
       </div>
       <div class="search-options">
         <label>Results: <input type="number" id="top-k" value="10" min="1" max="50" style="width:50px;"></label>
-        <button onclick="loadAnother()" style="background:#333;color:#e0e0e0;padding:6px 14px;font-size:0.8rem;">Load another index</button>
       </div>
       <p class="status" id="search-status"></p>
       <div id="search-results"></div>
@@ -169,11 +204,13 @@
       reader.onload = function (e) {
         try {
           indexData = JSON.parse(e.target.result);
-          showIndexInfo();
           document.getElementById("load-section").style.display = "none";
-          // Keep about section but collapse it to just the CLI commands
-          var aboutKids = document.getElementById("about-section").children;
-          for (var i = 0; i < aboutKids.length - 1; i++) aboutKids[i].style.display = "none";
+          // Show success banner
+          var vc = Object.keys(indexData.videos || {}).length;
+          var tc = (indexData.text_chunks && indexData.text_chunks.ids) ? indexData.text_chunks.ids.length : 0;
+          document.getElementById("loaded-title").textContent = "Index loaded!";
+          document.getElementById("loaded-detail").textContent = vc + " videos, " + tc + " searchable chunks";
+          document.getElementById("loaded-banner").style.display = "block";
           document.getElementById("search-section").style.display = "block";
           document.getElementById("search-input").focus();
           ensureTextModel();
@@ -200,13 +237,6 @@
       document.getElementById("index-file").click();
     }
 
-    function showIndexInfo() {
-      var el = document.getElementById("index-stats");
-      var vc = Object.keys(indexData.videos || {}).length;
-      var tc = (indexData.text_chunks && indexData.text_chunks.ids) ? indexData.text_chunks.ids.length : 0;
-      el.innerHTML = '<span class="tag">' + vc + ' videos</span><span class="tag">' + tc + ' text chunks</span>';
-      el.style.display = "block";
-    }
 
     // ---- Search ----
     document.getElementById("search-input").addEventListener("keydown", function (e) {
@@ -236,10 +266,21 @@
         });
       }
       scored.sort(function (a, b) { return b.score - a.score; });
-      var results = scored.slice(0, topK);
 
-      statusEl.textContent = results.length + " result" + (results.length !== 1 ? "s" : "") + " found.";
-      renderResults(results, query);
+      // Filter by relevance
+      var strong = scored.filter(function (r) { return r.score >= 0.3; });
+      var related = scored.filter(function (r) { return r.score >= 0.15 && r.score < 0.3; });
+      var relevant = scored.filter(function (r) { return r.score >= 0.15; });
+
+      lastScoredResults = relevant;
+      lastQuery = query;
+      var results = relevant.slice(0, topK);
+
+      var summary = strong.length + " strong match" + (strong.length !== 1 ? "es" : "") +
+        ", " + related.length + " related" +
+        " — showing " + results.length + " of " + relevant.length + " relevant";
+      statusEl.textContent = summary;
+      renderResults(results, query, relevant.length);
     }
 
     function cosineSim(a, b) {
@@ -248,7 +289,10 @@
       return dot / (Math.sqrt(nA) * Math.sqrt(nB) + 1e-8);
     }
 
-    function renderResults(results, query) {
+    var lastScoredResults = [];
+    var lastQuery = "";
+
+    function renderResults(results, query, totalCount) {
       var container = document.getElementById("search-results");
       container.innerHTML = "";
       if (!results.length) { container.innerHTML = '<div class="no-results">No results found.</div>'; return; }
@@ -260,74 +304,90 @@
         var title = meta.title || vid;
         var ts = Math.floor(r.metadata.start || 0);
         var endTs = Math.floor(r.metadata.end || ts + 30);
-        var link = "https://www.youtube.com/watch?v=" + vid + "&t=" + ts;
+        var link = "https://www.youtube.com/watch?v=" + vid + "&t=" + ts + "s";
 
         var card = document.createElement("div");
         card.className = "result-card";
-        card.style.flexDirection = "column";
 
-        // Header row: title + score
-        var header = document.createElement("div");
-        header.style.cssText = "display:flex;justify-content:space-between;align-items:start;gap:12px;";
-
-        var titleEl = document.createElement("div"); titleEl.className = "result-title";
-        var a = document.createElement("a"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = title;
-        titleEl.appendChild(a);
-        if (meta.channel) { var ch = document.createElement("div"); ch.className = "result-channel"; ch.textContent = meta.channel; titleEl.appendChild(ch); }
-        header.appendChild(titleEl);
-
-        var sc = document.createElement("div"); sc.className = "result-score"; sc.style.whiteSpace = "nowrap";
-        sc.textContent = r.score.toFixed(3) + "  \u2022  " + fmtTime(ts) + " → " + fmtTime(endTs);
-        header.appendChild(sc);
-        card.appendChild(header);
-
-        // Embedded YouTube player starting at timestamp
+        // Left side: embedded YouTube player
         var playerWrap = document.createElement("div");
-        playerWrap.style.cssText = "margin:10px 0;border-radius:8px;overflow:hidden;position:relative;padding-bottom:56.25%;height:0;background:#000;";
+        playerWrap.style.cssText = "width:280px;height:158px;flex-shrink:0;border-radius:6px;overflow:hidden;background:#000;";
         var iframe = document.createElement("iframe");
-        iframe.src = "https://www.youtube.com/embed/" + vid + "?start=" + ts + "&autoplay=0";
-        iframe.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:8px;";
+        iframe.src = "https://www.youtube.com/embed/" + vid + "?start=" + ts + "&rel=0&modestbranding=1";
+        iframe.style.cssText = "width:100%;height:100%;border:none;";
         iframe.allow = "accelerometer; encrypted-media; gyroscope; picture-in-picture";
         iframe.setAttribute("allowfullscreen", "");
         iframe.loading = "lazy";
         playerWrap.appendChild(iframe);
         card.appendChild(playerWrap);
 
-        // Transcript text
-        if (r.text) {
-          var txt = document.createElement("div"); txt.className = "result-text";
-          txt.style.maxHeight = "none";
-          txt.innerHTML = highlightText(r.text, qw);
-          card.appendChild(txt);
-        }
+        // Right side: info
+        var body = document.createElement("div"); body.className = "result-body";
 
-        // Actions row
+        var titleEl = document.createElement("div"); titleEl.className = "result-title";
+        var a = document.createElement("a"); a.href = link; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = title;
+        titleEl.appendChild(a);
+        body.appendChild(titleEl);
+
+        if (meta.channel) { var ch = document.createElement("div"); ch.className = "result-channel"; ch.textContent = meta.channel; body.appendChild(ch); }
+
+        if (r.text) { var txt = document.createElement("div"); txt.className = "result-text"; txt.innerHTML = highlightText(r.text, qw); body.appendChild(txt); }
+
+        var sc = document.createElement("div"); sc.className = "result-score";
+        var strength = r.score >= 0.3 ? "strong" : "related";
+        var strengthColor = r.score >= 0.3 ? "#4caf50" : "#ff9800";
+        var sourceType = r.metadata.type || "text";
+        var sourceLabel = sourceType === "gemini" ? ' <span style="color:#4a9eff;">gemini</span>' : sourceType === "whisper" ? ' <span style="color:#ff9800;">whisper</span>' : "";
+        sc.innerHTML = '<span style="color:' + strengthColor + ';font-weight:600;">' + strength + '</span> ' + r.score.toFixed(3) + sourceLabel + "  \u2022  " + fmtTime(ts) + " → " + fmtTime(endTs);
+        body.appendChild(sc);
+
+        // Action buttons
         var actions = document.createElement("div");
-        actions.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;";
+        actions.style.cssText = "display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;";
 
         var clipCmd = 'python embedclipfarm.py clip ' + vid + ' --start ' + ts + ' --end ' + endTs;
-
         var copyBtn = document.createElement("button");
-        copyBtn.textContent = "Copy clip command";
-        copyBtn.style.cssText = "padding:6px 14px;font-size:0.8rem;background:#282828;color:#e040fb;border:1px solid #444;border-radius:4px;cursor:pointer;";
+        copyBtn.textContent = "Copy clip cmd";
+        copyBtn.style.cssText = "padding:4px 10px;font-size:0.75rem;background:#282828;color:#e040fb;border:1px solid #444;border-radius:4px;cursor:pointer;";
         copyBtn.onclick = (function (cmd, btn) {
           return function () {
             navigator.clipboard.writeText(cmd);
             btn.textContent = "Copied!";
-            setTimeout(function () { btn.textContent = "Copy clip command"; }, 2000);
+            setTimeout(function () { btn.textContent = "Copy clip cmd"; }, 2000);
           };
         })(clipCmd, copyBtn);
         actions.appendChild(copyBtn);
 
         var openBtn = document.createElement("button");
-        openBtn.textContent = "Open on YouTube";
-        openBtn.style.cssText = "padding:6px 14px;font-size:0.8rem;background:#282828;color:#ccc;border:1px solid #444;border-radius:4px;cursor:pointer;";
+        openBtn.textContent = "YouTube";
+        openBtn.style.cssText = "padding:4px 10px;font-size:0.75rem;background:#282828;color:#ccc;border:1px solid #444;border-radius:4px;cursor:pointer;";
         openBtn.onclick = function () { window.open(link, "_blank"); };
         actions.appendChild(openBtn);
 
-        card.appendChild(actions);
+        body.appendChild(actions);
+        card.appendChild(body);
         container.appendChild(card);
       });
+
+      // Show more button
+      if (results.length < totalCount) {
+        var moreWrap = document.createElement("div");
+        moreWrap.style.cssText = "text-align:center;margin:20px 0;";
+        var moreBtn = document.createElement("button");
+        moreBtn.textContent = "Show more (" + (totalCount - results.length) + " remaining)";
+        moreBtn.style.cssText = "padding:10px 24px;font-size:0.9rem;background:#282828;color:#e040fb;border:1px solid #444;border-radius:6px;cursor:pointer;font-weight:600;";
+        moreBtn.onclick = function () {
+          var currentCount = container.querySelectorAll(".result-card").length;
+          var nextBatch = lastScoredResults.slice(currentCount, currentCount + 10);
+          var statusEl = document.getElementById("search-status");
+          statusEl.textContent = "Showing " + (currentCount + nextBatch.length) + " of " + totalCount + " total chunks.";
+          moreWrap.remove();
+          // Re-render with more results
+          renderResults(lastScoredResults.slice(0, currentCount + 10), lastQuery, totalCount);
+        };
+        moreWrap.appendChild(moreBtn);
+        container.appendChild(moreWrap);
+      }
     }
 
     function highlightText(text, words) {
