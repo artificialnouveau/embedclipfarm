@@ -1174,6 +1174,17 @@ def cmd_transcripts(args):
     print(f"\n{len(videos)} video(s), {sum(len(c) for c in videos.values())} chunks total.")
 
 
+def _find_clips_dir(explicit_dir):
+    """Auto-detect the clips directory inside a project subfolder."""
+    if explicit_dir != "./clips":
+        return explicit_dir
+    # Look for project subfolders with db/
+    dbs = sorted(Path(".").glob("*/db/chroma.sqlite3"))
+    if len(dbs) == 1:
+        return str(dbs[0].parent.parent / "clips")
+    return explicit_dir
+
+
 def cmd_clip(args):
     """Download a specific clip from a YouTube video."""
     video_id = extract_video_id(args.video) or args.video
@@ -1186,7 +1197,7 @@ def cmd_clip(args):
     actual_end = end + padding
 
     url = f"https://www.youtube.com/watch?v={video_id}"
-    out_dir = args.output_dir
+    out_dir = _find_clips_dir(args.output_dir)
     os.makedirs(out_dir, exist_ok=True)
 
     # Build filename
@@ -1246,7 +1257,7 @@ def cmd_search_and_clip(args):
         clips_to_download.append((meta["video_id"], start, end, title))
 
     if args.download:
-        out_dir = args.download
+        out_dir = _find_clips_dir(args.download) if args.download == "./clips" else args.download
         os.makedirs(out_dir, exist_ok=True)
         print(f"\n{'='*60}")
         print(f"Downloading {len(clips_to_download)} clip(s) to {out_dir}/...")
