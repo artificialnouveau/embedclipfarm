@@ -597,17 +597,18 @@ def _frame_to_base64(frame):
     return base64.b64encode(buf.getvalue()).decode()
 
 
-def annotate_keyframes(frames, provider, api_key):
+def annotate_keyframes(frames, provider, api_key, prompt=None):
     """Annotate keyframes using the specified vision API provider."""
+    use_prompt = prompt or SCENE_PROMPT
     if provider == "gemini":
-        return _annotate_gemini(frames, api_key)
+        return _annotate_gemini(frames, api_key, use_prompt)
     elif provider == "claude":
-        return _annotate_claude(frames, api_key)
+        return _annotate_claude(frames, api_key, use_prompt)
     else:
         raise ValueError(f"Unknown vision provider: {provider}")
 
 
-def _annotate_gemini(frames, api_key):
+def _annotate_gemini(frames, api_key, prompt):
     """Use Gemini to generate rich text descriptions of keyframes."""
     import urllib.request
 
@@ -617,7 +618,7 @@ def _annotate_gemini(frames, api_key):
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": SCENE_PROMPT},
+                    {"text": prompt},
                     {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}},
                 ]
             }]
@@ -642,7 +643,7 @@ def _annotate_gemini(frames, api_key):
     return descriptions
 
 
-def _annotate_claude(frames, api_key):
+def _annotate_claude(frames, api_key, prompt):
     """Use Claude (Anthropic) to generate rich text descriptions of keyframes."""
     import urllib.request
 
@@ -663,7 +664,7 @@ def _annotate_claude(frames, api_key):
                             "data": img_b64,
                         },
                     },
-                    {"type": "text", "text": SCENE_PROMPT},
+                    {"type": "text", "text": prompt},
                 ],
             }],
         }
@@ -959,7 +960,7 @@ def cmd_index(args):
                     if frames:
                         meta = metadata.get(vid, {})
                         print(f"  [{provider}] {vid} — {len(frames)} frames — {meta.get('title', '')[:40]}")
-                        descriptions = annotate_keyframes(frames, provider, vision_key)
+                        descriptions = annotate_keyframes(frames, provider, vision_key, prompt=args.vision_prompt)
                         # Embed descriptions as text chunks (searchable with same model)
                         for j, (frame, desc) in enumerate(zip(frames, descriptions)):
                             emb = embed_texts([desc], text_model)[0]
@@ -1475,6 +1476,8 @@ def main():
         help="Annotate keyframes with a vision API: gemini or claude")
     idx.add_argument("--vision-key", default=None,
         help="API key for vision provider (or set GEMINI_API_KEY / ANTHROPIC_API_KEY in .env)")
+    idx.add_argument("--vision-prompt", default=None,
+        help="Custom prompt for vision annotation (default: detailed scene description for search indexing)")
     idx.add_argument("--cookies-from-browser", default=None,
         help="Browser to extract cookies from for age-restricted videos (e.g. chrome, firefox, safari)")
     idx.add_argument("--show-transcripts", action="store_true",
